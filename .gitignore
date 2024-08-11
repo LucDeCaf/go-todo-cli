@@ -1,5 +1,5 @@
-todo_data.csv
-
 # ignore files without an extension
 *
 !*.*
+
+todo_data.csv
