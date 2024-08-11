@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"syscall"
 	"text/tabwriter"
 	"time"
 )
@@ -17,7 +18,8 @@ type Todo struct {
 	CreatedAt   time.Time
 }
 
-var todos map[int]Todo = make(map[int]Todo)
+// TODO: Use slice instead for 'free' ordered data
+var todos map[int]*Todo = make(map[int]*Todo)
 var nextId int = 1
 
 func main() {
@@ -49,8 +51,40 @@ func main() {
 		if err := w.Flush(); err != nil {
 			log.Fatal(err)
 		}
+	case "add":
+		if argCount < 2 {
+			log.Fatal("Err: Missing argument 'description' for action 'add'")
+		}
+		if argCount > 2 {
+			log.Fatal("Err: Too many arguments for action 'add'")
+		}
+
+		t := NewTodo(args[1])
+		todos[nextId] = &t
+
+		fmt.Printf("Added todo '%v' with id '%v'\n", args[1], nextId)
+	case "check":
+		if argCount < 2 {
+			log.Fatal("Err: Missing argument 'id' for action 'check'")
+		}
+		if argCount > 2 {
+			log.Fatal("Err: Too many arguments for action 'check'")
+		}
+
+		id, err := strconv.Atoi(args[1])
+		if err != nil {
+			log.Fatal("Err: " + err.Error())
+		}
+
+		if todos[id].Completed {
+			fmt.Println("Already completed.")
+			break
+		}
+		
+		todos[id].Completed = true
+		fmt.Printf("Marked '%v' as completed\n", todos[id].Description)
 	default:
-		fmt.Println("invalid argument")
+		log.Fatal(fmt.Sprintf("Err: Invalid action '%v'\n", action))
 	}
 
 	// Write updated todos from program memory
@@ -66,7 +100,6 @@ func NewTodo(desc string) Todo {
 		Completed:   false,
 		CreatedAt:   time.Now(),
 	}
-	nextId++
 	return t
 }
 
@@ -92,17 +125,18 @@ func NewTodoCSV(record []string) (t Todo, err error) {
 	return
 }
 
-func (t Todo) Add() {
-	todos[nextId] = t
-	nextId++
-}
-
 func ReadFromCSV(path string) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, 0666)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	if err := lockFile(f); err != nil {
+		return err
+	}
+	defer func() {
+		unlockFile(f)
+		f.Close()
+	}()
 
 	r := csv.NewReader(f)
 
@@ -130,7 +164,7 @@ func ReadFromCSV(path string) error {
 			return err
 		}
 
-		todos[id] = t
+		todos[id] = &t
 		if id >= nextId {
 			nextId = id + 1
 		}
@@ -142,7 +176,13 @@ func WriteToCSV(path string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	if err := lockFile(f); err != nil {
+		return err
+	}
+	defer func() {
+		unlockFile(f)
+		f.Close()
+	}()
 
 	w := csv.NewWriter(f)
 
@@ -161,4 +201,15 @@ func WriteToCSV(path string) error {
 
 	w.Flush()
 	return w.Error()
+}
+
+func lockFile(f *os.File) error {
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	return nil
+}
+
+func unlockFile(f *os.File) {
+	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 }

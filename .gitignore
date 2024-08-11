@@ -1,2 +1,5 @@
-go-todo-cli
 todo_data.csv
+
+# ignore files without an extension
+*
+!*.*
